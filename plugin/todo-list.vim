@@ -5,13 +5,17 @@
 
 " ====== Tokens ======
 if !exists("g:TodoListTokens")
-    let g:TodoListTokens = [ "TODO", "FIXME", "XXX" ]
+    let g:TodoListTokens = [ "FIXME", "XXX", "TODO" ]
+endif
+
+if !exists("g:todo_file_ext")
+    let g:todo_file_ext = 'td'
 endif
 
 " ====== Private functions ======
 
 " Search the tokens in current file
-fu! s:SearchTokens()
+fu! s:SearchTokens(format_fn)
 
     let l:filename = expand('%p:h')
     let l:index = 0
@@ -27,9 +31,8 @@ fu! s:SearchTokens()
         while (l:lineno > 0)
             let l:matches += 1
             let l:linetext = getline(l:lineno)
-            let l:text = '('.l:filename.':'.l:lineno.') '
-            let l:text .= strpart(l:linetext, strridx(l:linetext, l:token))
-            let @t .= l:text . "\n"
+            let l:text = a:format_fn(l:filename, l:lineno, l:linetext, l:token) 
+            let @t .= l:text
             " Last line: break
             if l:lineno == line('$')
                 break
@@ -46,10 +49,31 @@ fu! s:SearchTokens()
     return l:matches
 endfu
 
-" Format a task to be written or shown 
-fu! s:FormatItem(item)
+" Format a task to be shown in buffer
+fu! s:FormatItemBuffer(filename, lineno, linetext, token)
+    let l:text = '('.a:filename.':'.a:lineno.') '
+    let l:text .= strpart(a:linetext, strridx(a:linetext, a:token))
+    let l:text .= "\n"
+
+    return l:text
 endfu
 
+" Format a task to be written in file
+fu! s:FormatItemFile(filename, lineno, linetext, token)
+    if a:token == "FIXME"
+        let l:priority = "(A)"
+    elseif a:token == "XXX"
+        let l:priority = "(B)"
+    else
+        let l:priority = "(C)"
+    endif
+
+    let l:text = '    [ ] ('.a:filename.':'.a:lineno.') '
+    let l:text .= strpart(a:linetext, strridx(a:linetext, a:token))
+    let l:text .= l:priority."\n"
+
+    return l:text
+endfu
 " Gets the line number of the current task
 fu! s:GetLineNumber()
     let l:line = getline('.')
@@ -89,7 +113,7 @@ fu! s:LineSearchLoop()
     endif
     
     " To highlight the current line in the todo list
-    exe 'match Search /\%'.line(".").'l.*/'
+    exe 'match PmenuSel /\%'.line(".").'l.*/'
 
     let l:bufnr = b:original_bufnr
     exe bufwinnr(l:bufnr).' wincmd w'
@@ -98,7 +122,7 @@ fu! s:LineSearchLoop()
     match none
     exe 'normal! '.l:lineno.'Gzz'
     " To highlight the current line in the file
-    exe 'match Search /\%'.line(".").'l.*/'
+    exe 'match PmenuSel /\%'.line(".").'l.*/'
 
     exe bufwinnr('TODO_'.l:bufnr).' wincmd w'
 endfu
@@ -108,7 +132,7 @@ fu! s:OpenBuffer(bufferno)
 
     let l:bufferMaxSize = 20
     lockvar l:bufferMaxSize
-    let l:matches = <SID>SearchTokens()
+    let l:matches = <SID>SearchTokens(function("<SID>FormatItemBuffer"))
 
     if l:matches == 0
         echo "No pending tasks in this file"
@@ -130,15 +154,14 @@ fu! s:OpenBuffer(bufferno)
     " Cleanup the register t
     let @t = ""
     set nomodified
+    set nomodifiable
 
     let b:original_bufnr = a:bufferno
 
     " Create maps to close the window
     nnoremap <Leader>q :call <SID>Exit(0)<cr>
 
-    let s:old_updatetime = &updatetime
-    set updatetime=350
-    au! CursorHold <buffer> nested call <SID>LineSearchLoop()
+    au! CursorMoved <buffer> nested call <SID>LineSearchLoop()
 endfu
 
 " Closes the buffer where the list is displayed
@@ -151,9 +174,8 @@ fu! s:Exit(exitcode)
     " Unmap the exit
     nunmap <Leader>q
 
-    " Remove matches and recover update time
+    " Remove matches
     match none
-    exe 'set updatetime='.s:old_updatetime
 
     let l:bufnr = b:original_bufnr
     exe bufwinnr(l:bufnr).' wincmd w'
@@ -165,6 +187,26 @@ endfu
 
 " Writes the content of the register in a file
 fu! s:WriteToFile()
+    let l:filename = expand('%t:h')
+    let l:basename = matchstr(l:filename, '\w\+\ze[.]') 
+
+    if len(l:basename) > 0
+        let l:todo_filename =  l:basename . '.'.g:todo_file_ext
+    else
+        let l:todo_filename =  l:filename . '.'.g:todo_file_ext
+    endif
+
+    let l:matches = <SID>SearchTokens(function("<SID>FormatItemFile"))
+
+    
+    let l:header = [ '# TODO list', '# Created at: '.strftime('%Y-%m-%d %H:%M:%S'), '' ]
+    let l:todolist = l:header + split(@t, "\n") 
+    echon "Writing todo list into file ". l:todo_filename . "... "
+    call writefile(l:todolist, l:todo_filename)
+    echon "done"
+
+    " Cleanup register t
+    let @t = ""
 endfu
 
 " Parses the current directory for tokens and store them in the register
@@ -181,6 +223,7 @@ endfu
 
 " ===== Commands =====
 command! TodoList call s:TodoList()
+command! WriteTodoList call s:WriteToFile()
 
 " ===== Mapping =====
 if !exists('g:todo_list_map_keys')
@@ -191,6 +234,5 @@ endif
 noremap <Plug>TodoList :TodoList
 
 if g:todo_list_map_keys
-    echo "hola"
     nmap <silent> <Leader>t <Plug>TodoList<CR>
 endif
