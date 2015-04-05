@@ -1,0 +1,33 @@
+*todo-list.txt* Library to parse files looking for TODO, FIXME and XXX comentaries 
+and show them by line number and file in a buffer.
+
+
+===============================================================================
+1. Description
+
+This library parses provides two main functionalities:
+
+1. Parse the current file and show FIXME, TODO and XXX messages in an interective
+buffer. When the cursor in over an item, it highlights its position in the 
+containing file
+
+2. Writes all the FIXME, TODO and XXX messages into a .todo file that can be easily
+read using fancy-todo-vim plugin (https://github.com/jcao2/fancy-todo-vim)
+
+
+===============================================================================
+2. Commands
+
+There are only two commands so far:
+
+1. TodoList: Shows the buffer with the list of tasks
+2. WriteTodoList: Writes all the tasks into a .todo with the following priorities:
+    FIXME: A
+    XXX: B
+    TODO: C
+
+
+===============================================================================
+2. Maps
+
+1. <Leader>t: Calls TodoList command
