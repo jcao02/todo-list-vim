@@ -154,7 +154,6 @@ fu! s:OpenBuffer(bufferno)
     " Cleanup the register t
     let @t = ""
     set nomodified
-    set nomodifiable
 
     let b:original_bufnr = a:bufferno
 
