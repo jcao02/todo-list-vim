@@ -28,6 +28,6 @@ There are only two commands so far:
 
 
 ===============================================================================
-2. Maps
+3. Maps
 
 1. <Leader>t: Calls TodoList command
