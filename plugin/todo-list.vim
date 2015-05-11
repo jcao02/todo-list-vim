@@ -15,11 +15,12 @@ endif
 " ====== Private functions ======
 
 " Search the tokens in current file
-fu! s:SearchTokens(format_fn)
+fu! s:search_tokens(format_fn)
 
-    let l:filename = expand('%p:h')
-    let l:index = 0
-    let l:matches = 0
+    let l:filename     = expand('%p:h')
+    let l:index        = 0
+    let l:matches      = 0
+    let l:matches_list = []
     while (l:index < len(g:TodoListTokens))
         " Getting the token to search
         let l:token = g:TodoListTokens[l:index]
@@ -30,9 +31,11 @@ fu! s:SearchTokens(format_fn)
         let l:lineno = search(l:token, "Wc")
         while (l:lineno > 0)
             let l:matches += 1
-            let l:linetext = getline(l:lineno)
-            let l:text = a:format_fn(l:filename, l:lineno, l:linetext, l:token) 
-            let @t .= l:text
+
+            let l:linetext  = getline(l:lineno)
+            let l:text      = a:format_fn(l:filename, l:lineno, l:linetext, l:token)
+
+            call add(l:matches_list, l:text)
             " Last line: break
             if l:lineno == line('$')
                 break
@@ -46,20 +49,19 @@ fu! s:SearchTokens(format_fn)
         let l:index += 1
     endwhile
 
-    return l:matches
+    return [l:matches, l:matches_list]
 endfu
 
 " Format a task to be shown in buffer
-fu! s:FormatItemBuffer(filename, lineno, linetext, token)
+fu! s:format_item_buffer(filename, lineno, linetext, token)
     let l:text = '('.a:filename.':'.a:lineno.') '
     let l:text .= strpart(a:linetext, strridx(a:linetext, a:token))
-    let l:text .= "\n"
 
     return l:text
 endfu
 
 " Format a task to be written in file
-fu! s:FormatItemFile(filename, lineno, linetext, token)
+fu! s:format_item_file(filename, lineno, linetext, token)
     if a:token == "FIXME"
         let l:priority = "(A)"
     elseif a:token == "XXX"
@@ -68,14 +70,15 @@ fu! s:FormatItemFile(filename, lineno, linetext, token)
         let l:priority = "(C)"
     endif
 
-    let l:text = '    [ ] ('.a:filename.':'.a:lineno.') '
+    let l:text = '- [ ] ('.a:filename.':'.a:lineno.') '
     let l:text .= strpart(a:linetext, strridx(a:linetext, a:token))
-    let l:text .= l:priority."\n"
+    let l:text .= l:priority
 
     return l:text
 endfu
+
 " Gets the line number of the current task
-fu! s:GetLineNumber()
+fu! s:get_line_number()
     let l:line = getline('.')
 
     if len(l:line) == 0
@@ -98,7 +101,7 @@ fu! s:GetLineNumber()
     endif
 endfu
 
-fu! s:LineSearchLoop()
+fu! s:line_search_loop()
 
     " Don't do anything if the buffer is not a TODO list
     if stridx(expand("%:t"), 'TODO_') == -1
@@ -106,7 +109,7 @@ fu! s:LineSearchLoop()
     endif
 
     match none
-    let l:lineno = <SID>GetLineNumber()
+    let l:lineno = <SID>get_line_number()
 
     if (l:lineno == -1) 
         return
@@ -128,11 +131,11 @@ fu! s:LineSearchLoop()
 endfu
 
 " Opens a buffer to show the items found
-fu! s:OpenBuffer(bufferno)
+fu! s:open_buffer(bufferno)
 
     let l:bufferMaxSize = 20
     lockvar l:bufferMaxSize
-    let l:matches = <SID>SearchTokens(function("<SID>FormatItemBuffer"))
+    let [l:matches, l:matches_list] = <SID>search_tokens(function("<SID>format_item_buffer"))
 
     if l:matches == 0
         echo "No pending tasks in this file"
@@ -148,30 +151,20 @@ fu! s:OpenBuffer(bufferno)
 
     set noswapfile
     set modifiable
-    " Paste the register and erase last line 
-    norm! "tPGddgg
-
-    " Cleanup the register t
-    let @t = ""
+    call setline(1, l:matches_list)
     set nomodified
+    set nomodifiable
 
     let b:original_bufnr = a:bufferno
 
-    " Create maps to close the window
-    nnoremap <Leader>q :call <SID>Exit(0)<cr>
-
-    au! CursorMoved <buffer> nested call <SID>LineSearchLoop()
+    au! CursorMoved <buffer> nested call <SID>line_search_loop()
 endfu
 
 " Closes the buffer where the list is displayed
-fu! s:Exit(exitcode)
+fu! s:exit(exitcode)
 
     let l:todo_bufnr = bufnr('TODO_'.b:original_bufnr)
-    echo l:todo_bufnr
     exe l:todo_bufnr.'bd!'
-
-    " Unmap the exit
-    nunmap <Leader>q
 
     " Remove matches
     match none
@@ -185,7 +178,7 @@ fu! s:Exit(exitcode)
 endfu
 
 " Writes the content of the register in a file
-fu! s:WriteToFile()
+fu! s:write_to_file()
     let l:filename = expand('%t:h')
     let l:basename = matchstr(l:filename, '\w\+\ze[.]') 
 
@@ -195,17 +188,15 @@ fu! s:WriteToFile()
         let l:todo_filename =  l:filename . '.'.g:todo_file_ext
     endif
 
-    let l:matches = <SID>SearchTokens(function("<SID>FormatItemFile"))
+    let [l:matches, l:matches_list] = <SID>search_tokens(function("<SID>format_item_file"))
 
     
     let l:header = [ '# TODO list', '# Created at: '.strftime('%Y-%m-%d %H:%M:%S'), '' ]
-    let l:todolist = l:header + split(@t, "\n") 
+    let l:todolist = l:header + l:matches_list
     echon "Writing todo list into file ". l:todo_filename . "... "
     call writefile(l:todolist, l:todo_filename)
     echon "done"
 
-    " Cleanup register t
-    let @t = ""
 endfu
 
 " Parses the current directory for tokens and store them in the register
@@ -213,22 +204,30 @@ fu! s:parseDirectory(directory)
 endfu
 
 
-fu s:TodoList()
-    let b:original_line = line('.')
-    let b:original_bufnr = bufnr('%')
+fu! s:todo_list()
+    if !exists("b:original_line")
+        let b:original_line  = line('.')
+    endif
+    if !exists("b:original_bufnr")
+        let b:original_bufnr = bufnr('%')
+    endif
     let l:current_buffer = b:original_bufnr
-    :call <SID>OpenBuffer(l:current_buffer)
+
+    if buflisted('TODO_'.b:original_bufnr)
+        call <SID>exit(0)
+    else
+        :call <SID>open_buffer(l:current_buffer)
+    endif
 endfu
 
 " ===== Commands =====
-command! TodoList call s:TodoList()
-command! WriteTodoList call s:WriteToFile()
+command! TodoList call <SID>todo_list()
+command! WriteTodoList call <SID>write_to_file()
 
 " ===== Mapping =====
 if !exists('g:todo_list_map_keys')
     let g:todo_list_map_keys = 1
 endif
-
 
 noremap <Plug>TodoList :TodoList
 
